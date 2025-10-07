@@ -9,6 +9,7 @@ import {
 } from "@/components/home";
 import { useVideoPlayer } from "@/hooks/useVideoPlayer";
 import { Header, Footer } from "@/components/navigation";
+import { ProgressLoader } from "@/components/ui";
 import {
   MAIN_ANIMATION,
   houseA,
@@ -33,6 +34,8 @@ export const HomePage = () => {
     playBackToMenu,
     bgImage,
     activeVideo,
+    isLoading,
+    loadingProgress,
   } = useVideoPlayer(MAIN_ANIMATION, activeHouse);
 
   const handleHouseA = async () => {
@@ -61,11 +64,11 @@ export const HomePage = () => {
 
   const handleBack = async () => {
     setMode("house");
-    let backSrc = "/renders/HouseA_1-0.mp4";
+    let backSrc = activeHouse[0].introSrc.replace("_0-1", "_1-0");
     if (activeHouse === houseB) {
-      backSrc = "/renders/HouseB_1-0.mp4";
+      backSrc = houseB[0].introSrc.replace("_0-1", "_1-0");
     } else if (activeHouse === playground) {
-      backSrc = "/renders/Playground_1-0.mp4";
+      backSrc = playground[0].introSrc.replace("_0-1", "_1-0");
     }
 
     await playBackToMenu(backSrc, () => {
@@ -75,6 +78,9 @@ export const HomePage = () => {
 
   return (
     <main className="w-full relative overflow-x-hidden">
+      {/* Progress Loader */}
+      {isLoading && <ProgressLoader progress={loadingProgress} />}
+
       <Header />
 
       <div className="w-full min-h-screen relative" id="house">
@@ -89,6 +95,7 @@ export const HomePage = () => {
           <VideoBackground
             videoRef1={videoRef1}
             videoRef2={videoRef2}
+            bgImage={bgImage}
             activeVideo={activeVideo}
           />
           <div className="absolute inset-0 bg-gradient-to-br from-black/40 via-black/20 to-transparent pointer-events-none"></div>

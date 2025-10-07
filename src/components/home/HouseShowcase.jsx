@@ -131,6 +131,9 @@ export const HouseShowcase = ({
                   alt={corner.label}
                   fill
                   className="object-cover"
+                  sizes="80px"
+                  quality={75}
+                  loading="lazy"
                 />
               </button>
             );

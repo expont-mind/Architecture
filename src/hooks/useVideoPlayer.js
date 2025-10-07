@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { getImageUrl } from "@/lib/cdn-config";
 
 export function useVideoPlayer(MAIN_ANIMATION, houseData) {
   const videoRef1 = useRef(null);
@@ -10,39 +11,77 @@ export function useVideoPlayer(MAIN_ANIMATION, houseData) {
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [activeVideo, setActiveVideo] = useState(1);
   const [bgImage, setBgImage] = useState(null);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const urls = [MAIN_ANIMATION.src];
-    houseData.forEach((h) => {
-      urls.push(h.introSrc, h.loopSrc);
-      if (h.reverseTransition) urls.push(h.reverseTransition);
-      if (h.reverseTransition2) urls.push(h.reverseTransition2);
-      if (h.wrapTransition) urls.push(h.wrapTransition);
-      if (h.transitionTo1) urls.push(h.transitionTo1);
-      if (h.transitionTo2) urls.push(h.transitionTo2);
-      if (h.transitionTo3) urls.push(h.transitionTo3);
-      if (h.transitionTo4) urls.push(h.transitionTo4);
+    // Only preload the main animation initially for faster first load
+    const mainVideo = document.createElement("video");
+    mainVideo.src = MAIN_ANIMATION.src;
+    mainVideo.preload = "auto";
+    mainVideo.muted = true;
+
+    const updateProgress = (progress) => {
+      setLoadingProgress(progress);
+    };
+
+    // Track loading progress
+    mainVideo.addEventListener('progress', () => {
+      if (mainVideo.buffered.length > 0) {
+        const bufferedEnd = mainVideo.buffered.end(mainVideo.buffered.length - 1);
+        const duration = mainVideo.duration;
+        if (duration > 0) {
+          const progress = (bufferedEnd / duration) * 100;
+          updateProgress(Math.min(progress, 100));
+        }
+      }
     });
-    let loaded = 0;
-    const pool = urls.map((src) => {
-      const v = document.createElement("video");
-      v.src = src;
-      v.preload = "auto";
-      v.muted = true;
-      v.oncanplaythrough = () => {
-        loaded++;
-      };
-      return v;
+
+    mainVideo.addEventListener('canplaythrough', () => {
+      updateProgress(100);
+      setTimeout(() => {
+        setIsLoading(false);
+      }, 300);
     });
-    return () => pool.forEach((v) => (v.src = ""));
-  }, [MAIN_ANIMATION, houseData]);
+
+    // Fallback: hide loader after 5 seconds even if not fully loaded
+    const fallbackTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 5000);
+
+    return () => {
+      clearTimeout(fallbackTimer);
+      mainVideo.src = "";
+    };
+  }, [MAIN_ANIMATION]);
 
   const playOnRef = async (ref, src, loop = false) => {
+    if (!ref.current) return;
+
+    // Cancel any pending play
+    ref.current.pause();
     ref.current.onended = null;
+    ref.current.oncanplaythrough = null;
+
+    // Load new source
     ref.current.src = src;
     ref.current.currentTime = 0;
     ref.current.loop = loop;
-    await ref.current.play();
+
+    // Wait for video to be ready and play
+    try {
+      await ref.current.play();
+    } catch (error) {
+      // Ignore interruption errors
+      if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') {
+        console.error('Video play error:', error);
+        console.error('Failed video URL:', src);
+        console.error('CDN Config:', {
+          USE_CDN: process.env.NEXT_PUBLIC_USE_CDN,
+          CDN_BASE_URL: process.env.NEXT_PUBLIC_CDN_URL
+        });
+      }
+    }
   };
 
   const getActiveRef = () => (activeVideo === 1 ? videoRef1 : videoRef2);
@@ -113,16 +152,21 @@ export function useVideoPlayer(MAIN_ANIMATION, houseData) {
 
     // Transition дуусах үед loop эхлүүлнэ
     inactiveRef.current.onended = async () => {
+      if (!inactiveRef.current) return;
       inactiveRef.current.onended = null;
 
       // Эхлээд loop тоглуулна
       await playOnRef(inactiveRef, targetCorner.loopSrc, true);
 
       // LoopSrc тоглоход frame гарч эхлэхтэй зэрэгцэж fallback устгана
-      inactiveRef.current.oncanplaythrough = () => {
-        setBgImage(null);
-        inactiveRef.current.oncanplaythrough = null;
-      };
+      if (inactiveRef.current) {
+        inactiveRef.current.oncanplaythrough = () => {
+          setBgImage(null);
+          if (inactiveRef.current) {
+            inactiveRef.current.oncanplaythrough = null;
+          }
+        };
+      }
 
       setActiveVideo((prev) => (prev === 1 ? 2 : 1));
       setIsTransitioning(false);
@@ -141,13 +185,18 @@ export function useVideoPlayer(MAIN_ANIMATION, houseData) {
     activeRef.current.style.opacity = 0;
 
     inactiveRef.current.onended = async () => {
+      if (!inactiveRef.current) return;
       inactiveRef.current.onended = null;
       await playOnRef(inactiveRef, targetCorner.loopSrc, true);
 
-      inactiveRef.current.oncanplaythrough = () => {
-        setBgImage(null);
-        inactiveRef.current.oncanplaythrough = null;
-      };
+      if (inactiveRef.current) {
+        inactiveRef.current.oncanplaythrough = () => {
+          setBgImage(null);
+          if (inactiveRef.current) {
+            inactiveRef.current.oncanplaythrough = null;
+          }
+        };
+      }
 
       setActiveVideo((prev) => (prev === 1 ? 2 : 1));
       setCurrentCorner(targetCorner.id);
@@ -186,21 +235,28 @@ export function useVideoPlayer(MAIN_ANIMATION, houseData) {
       activeRef.current.style.opacity = 0;
 
       inactiveRef.current.onended = async () => {
+        if (!inactiveRef.current) return;
         inactiveRef.current.onended = null;
 
-        setBgImage("/images/Hero_2.png");
+        setBgImage(getImageUrl("/images/Hero_2.webp"));
 
         // 1-0 backSrc тоглуулах
         await playOnRef(inactiveRef, backSrc, false);
 
+        if (!inactiveRef.current) return;
         inactiveRef.current.onended = async () => {
+          if (!inactiveRef.current) return;
           inactiveRef.current.onended = null;
 
           await playOnRef(inactiveRef, MAIN_ANIMATION.src, true);
 
-          inactiveRef.current.oncanplaythrough = () => {
-            inactiveRef.current.oncanplaythrough = null;
-          };
+          if (inactiveRef.current) {
+            inactiveRef.current.oncanplaythrough = () => {
+              if (inactiveRef.current) {
+                inactiveRef.current.oncanplaythrough = null;
+              }
+            };
+          }
 
           setActiveVideo((prev) => (prev === 1 ? 2 : 1));
           setCurrentCorner(null);
@@ -214,18 +270,23 @@ export function useVideoPlayer(MAIN_ANIMATION, houseData) {
       inactiveRef.current.style.opacity = 1;
       activeRef.current.style.opacity = 0;
 
-      setBgImage("/images/Hero_2.png");
+      setBgImage(getImageUrl("/images/Hero_2.webp"));
 
       inactiveRef.current.onended = async () => {
+        if (!inactiveRef.current) return;
         inactiveRef.current.onended = null;
 
         // Hero_2-2 loop тоглуулах
         await playOnRef(inactiveRef, MAIN_ANIMATION.src, true);
 
-        inactiveRef.current.oncanplaythrough = () => {
-          setBgImage(null); // loop тоглож эхлэхэд fallback арилна
-          inactiveRef.current.oncanplaythrough = null;
-        };
+        if (inactiveRef.current) {
+          inactiveRef.current.oncanplaythrough = () => {
+            setBgImage(null); // loop тоглож эхлэхэд fallback арилна
+            if (inactiveRef.current) {
+              inactiveRef.current.oncanplaythrough = null;
+            }
+          };
+        }
 
         setActiveVideo((prev) => (prev === 1 ? 2 : 1));
         setCurrentCorner(null);
@@ -251,5 +312,7 @@ export function useVideoPlayer(MAIN_ANIMATION, houseData) {
     playBackToMenu,
     bgImage,
     activeVideo,
+    isLoading,
+    loadingProgress,
   };
 }
